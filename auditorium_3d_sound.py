@@ -1,18 +1,4 @@
 # %%
-"""3D FDTD-model af auditoriet med et WAV-klip som lydkilde.
-
-Modellen er lavet som en overskuelig undervisningsmodel:
-
-* geometrien og lydfeltet bruger det samme koordinatsystem
-* vægge, tavle, loft, gulv og sæder ligger i et 3D-materialegitter
-* materialernes absorption dæmper luftcellerne langs materialefladerne
-* lydtrykket registreres ved hvert sæde
-* Plotly viser både lokalet og animerede 3D-isoflader af lydtrykket
-
-Absorptionsmodellen er en tilnærmelse. Frekvensafhængige impedansrandbetingelser
-kan tilføjes senere uden at ændre geometrien eller visualiseringen.
-"""
-
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -23,9 +9,9 @@ from scipy.signal import butter, filtfilt, welch
 
 
 # %%
-# ------------------------------------------------------------
+
 # 1. Indstillinger
-# ------------------------------------------------------------
+
 
 C = 343.0
 
@@ -48,15 +34,14 @@ SEATED_EAR_HEIGHT_ABOVE_FLOOR = 1.10
 
 PROFESSOR_POSITION = np.array([0.80, ROOM_WIDTH / 2, 1.65])
 
-# En mindre værdi giver flere gitterpunkter, højere opløselig frekvens
-# og væsentligt længere beregningstid.
+# En mindre værdi giver flere gitterpunkter, højere opløselig frekvens og væsentligt længere beregningstid.
 GRID_SPACING = 0.18
 POINTS_PER_WAVELENGTH = 10
 CFL_SAFETY = 0.70
 
-# Start med et kort udsnit. Forøg først når modellen fungerer på din computer.
-SIMULATION_DURATION = 0.05
-MAX_PLOTLY_FRAMES = 15
+# Simulationsvariable .
+SIMULATION_DURATION = 9
+MAX_PLOTLY_FRAMES = 40
 VISUALIZATION_SKIP = 2
 SOURCE_AMPLITUDE = 0.50
 
@@ -64,9 +49,9 @@ AUDIO_PATH = Path("Stine_fixed.wav")
 
 
 # %%
-# ------------------------------------------------------------
+
 # 2. Rumgeometri og sædeplaceringer
-# ------------------------------------------------------------
+
 
 row_depth = (ROOM_LENGTH - PROFESSOR_AREA_LENGTH) / NUMBER_OF_ROWS
 first_row_x = PROFESSOR_AREA_LENGTH + 0.5 * row_depth
@@ -110,9 +95,8 @@ def floor_height(x_value, y_value):
 
 
 # %%
-# ------------------------------------------------------------
+
 # 3. WAV-fil: analyse, filtrering og sampling ved FDTD-tiderne
-# ------------------------------------------------------------
 
 
 def read_mono_audio(wav_path):
@@ -192,9 +176,9 @@ def make_source_signal(audio, sample_rate, dt, number_of_steps, f_max):
 
 
 # %%
-# ------------------------------------------------------------
+
 # 4. 3D-gitter og materialer
-# ------------------------------------------------------------
+
 
 # Arrayrækkefølgen er altid [z, y, x].
 Nx = int(np.ceil(ROOM_LENGTH / GRID_SPACING)) + 1
@@ -238,7 +222,7 @@ MATERIAL_NAMES = {
     SEAT: "Polstret sæde",
 }
 
-# Foreløbige bredbåndsværdier. Senere kan de erstattes med én værdi pr. frekvensbånd.
+# Foreløbige bredbåndsværdier - måske kun én værdi til hver bånd 
 ABSORPTION = np.array(
     [
         0.00,  # luft
@@ -271,14 +255,14 @@ def voxel_box(center_x, center_y, bottom_z, size_x, size_y, size_z, material_id)
     material[zs, ys, xs] = material_id
 
 
-# Ydervægge. Tavlen overskriver senere en del af forvæggen.
+# Ydervægge. Tavlen overskriver en del af forvæggen.
 material[:, :, 0] = BRICK
 material[:, :, -1] = BRICK
 material[:, 0, :] = WINDOW
 material[:, -1, :] = BRICK
 material[-1, :, :] = CEILING
 
-# Trægulv, inklusive det hældende område.
+# Trægulv - inklusiv at det hælder 
 Grid_X, Grid_Y = np.meshgrid(x, y, indexing="xy")
 Grid_Floor_Z = floor_height(Grid_X, Grid_Y)
 for iy in range(Ny):
@@ -286,7 +270,7 @@ for iy in range(Ny):
         top_floor_index = int(np.searchsorted(z, Grid_Floor_Z[iy, ix], side="right") - 1)
         material[: top_floor_index + 1, iy, ix] = WOOD
 
-# Tavle: 40 cm væg over og under samt 40 cm væg til højre.
+# Tavle: 40 cm væg over og under og 40 cm væg til højre.
 board_y_slice = coordinate_slice(y, 0.0, ROOM_WIDTH - 0.40)
 board_z_slice = coordinate_slice(z, 0.40, ROOM_HEIGHT - 0.40)
 material[board_z_slice, board_y_slice, 0] = BOARD
@@ -328,9 +312,7 @@ surface_absorption = build_surface_absorption(material)
 
 
 # %%
-# ------------------------------------------------------------
 # 5. Indlæs lyd og kør den tredimensionelle FDTD-simulering
-# ------------------------------------------------------------
 
 if not AUDIO_PATH.exists():
     raise FileNotFoundError(
@@ -433,9 +415,8 @@ print(f"Sædeniveauer: {seat_relative_db.min():.1f} til {seat_relative_db.max():
 
 
 # %%
-# ------------------------------------------------------------
+
 # 6. Plotly-geometri
-# ------------------------------------------------------------
 
 
 def constant_surface(figure, x_values, y_values, z_values, color, opacity, name):
@@ -567,35 +548,35 @@ def make_room_figure():
     )
 
     # Målepunkterne viser samlet RMS-niveau ved sæderne, relativt til bedste sæde.
-    figure.add_trace(
-        go.Scatter3d(
-            x=seat_ear_positions[:, 0],
-            y=seat_ear_positions[:, 1],
-            z=seat_ear_positions[:, 2],
-            mode="markers",
-            marker=dict(
-                size=4,
-                color=seat_relative_db,
-                colorscale="Turbo",
-                cmin=-30,
-                cmax=0,
-                colorbar=dict(title="Sædeniveau<br>[relativ dB]", x=1.02),
-            ),
-            customdata=np.column_stack(
-                [
-                    np.repeat(np.arange(1, NUMBER_OF_ROWS + 1), SEATS_PER_ROW),
-                    np.tile(np.arange(1, SEATS_PER_ROW + 1), NUMBER_OF_ROWS),
-                    seat_relative_db,
-                ]
-            ),
-            hovertemplate=(
-                "Række %{customdata[0]:.0f}<br>"
-                "Sæde %{customdata[1]:.0f}<br>"
-                "%{customdata[2]:.1f} dB relativt<extra></extra>"
-            ),
-            name="Lydniveau ved sæder",
-        )
-    )
+    #figure.add_trace(
+     #   go.Scatter3d(
+      #      x=seat_ear_positions[:, 0],
+       #     y=seat_ear_positions[:, 1],
+        #    z=seat_ear_positions[:, 2],
+         #   mode="markers",
+          #  marker=dict(
+           #     size=4,
+            #    color=seat_relative_db,
+             #   colorscale="Turbo",
+              #  cmin=-30,
+               # cmax=0,
+                #colorbar=dict(title="Sædeniveau<br>[relativ dB]", x=1.02),
+            #),
+            #customdata=np.column_stack(
+             #   [
+              #      np.repeat(np.arange(1, NUMBER_OF_ROWS + 1), SEATS_PER_ROW),
+               #     np.tile(np.arange(1, SEATS_PER_ROW + 1), NUMBER_OF_ROWS),
+                #    seat_relative_db,
+                #]
+            #),
+            #hovertemplate=(
+             #   "Række %{customdata[0]:.0f}<br>"
+              #  "Sæde %{customdata[1]:.0f}<br>"
+               # "%{customdata[2]:.1f} dB relativt<extra></extra>"
+            #),
+            #name="Lydniveau ved sæder",
+        #)
+    #)
 
     figure.update_layout(
         scene=dict(
@@ -618,9 +599,9 @@ def make_room_figure():
 
 
 # %%
-# ------------------------------------------------------------
+
 # 7. Animeret 3D-lydfelt i lokalet
-# ------------------------------------------------------------
+
 
 plot_x = x[::VISUALIZATION_SKIP]
 plot_y = y[::VISUALIZATION_SKIP]
@@ -643,15 +624,15 @@ def sound_isosurface(frame, show_scale):
         y=flat_y,
         z=flat_z,
         value=magnitude,
-        isomin=0.25 * global_limit,
+        isomin=0.10 * global_limit,
         isomax=global_limit,
-        surface_count=3,
+        surface_count=5,
         colorscale=[
             [0.0, "rgb(230,220,255)"],
             [0.4, "rgb(160,105,220)"],
             [1.0, "rgb(70,0,120)"],
         ],
-        opacity=0.22,
+        opacity=0.40,
         caps=dict(x_show=False, y_show=False, z_show=False),
         showscale=show_scale,
         colorbar=dict(title="|Lydtryk|", x=1.14) if show_scale else None,
@@ -690,7 +671,7 @@ room_figure.update_layout(
                     args=[
                         None,
                         dict(
-                            frame=dict(duration=80, redraw=True),
+                            frame=dict(duration=300, redraw=True),
                             transition=dict(duration=0),
                             fromcurrent=True,
                         ),
